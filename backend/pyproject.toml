@@ -1,0 +1,21 @@
+[project]
+name = "doubao-workflow-backend"
+version = "0.1.0"
+description = "FastAPI backend that recreates the Coze storytelling workflow"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116,<1.0",
+  "uvicorn[standard]>=0.35,<1.0",
+  "httpx>=0.28,<1.0",
+  "pydantic-settings>=2.10,<3.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4,<9.0"
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+

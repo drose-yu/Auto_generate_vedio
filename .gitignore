@@ -1,0 +1,82 @@
+# ------------------------------
+# OS / Editor
+# ------------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ------------------------------
+# Environment / Secrets
+# ------------------------------
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+frontend/.env.*
+# local credentialed scripts/tests (do not open-source with real keys)
+backend/tests/test_doubao_tts.py
+backend/tests/*local*.py
+
+# ------------------------------
+# Python
+# ------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.hypothesis/
+.tox/
+.nox/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+backend/.venv/
+frontend/.venv/
+
+# Packaging
+*.egg-info/
+*.egg
+build/
+site/
+pip-wheel-metadata/
+
+# ------------------------------
+# Node / Frontend
+# ------------------------------
+node_modules/
+dist/
+frontend/node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# ------------------------------
+# Runtime / Temp / Logs
+# ------------------------------
+*.log
+*.tmp
+tmp/
+temp/
+.tmp_staged_app_vue.txt
+
+# pytest temp dirs (present in this repo)
+pytest-cache-files-*/
+backend/pytest-cache-files-*/
+
+# Workflow run artifacts
+backend/.tmp_test_storage/
+backend/backend/
+backend/data/workflow_runs/
+backend/data/
+
+
+
