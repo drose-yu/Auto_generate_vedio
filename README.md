@@ -8,7 +8,7 @@
 # 最大亮点
 上手难度极低，小白程序员按照下面步骤也可十分钟内进行复现
 
-# 视频展示（GitHub README 内嵌播放器）
+# 视频展示
 https://github.com/user-attachments/assets/f7464de5-4e68-4627-b655-bbde1d89c391
 
 ## 项目结构
