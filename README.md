@@ -162,3 +162,9 @@ ffmpeg -version
 
 ### 4) 文本/图片/视频生成失败
 可以自定义填入大模型的ID（Model ID可以在模型广场模块中点击你想接入的大模型，进入详情页就可以看到）
+
+如：
+
+    1.文本模型  doubao-seed-2-0-code-preview-260215
+    2.图片模型  doubao-seedream-4-5-251128
+    3.视频模型  doubao-seedance-1-5-pro-251215
