@@ -116,7 +116,6 @@ npm run dev
 
 ## 4. FFmpeg 安装（命令行）
 
-如果你提到的 `ffm` 指的是 `FFmpeg`，请按下面步骤安装。
 
 ### Windows（winget）
 
