@@ -8,6 +8,9 @@
 # 最大亮点
 上手难度极低，小白程序员按照下面步骤也可十分钟内进行复现
 
+# 视频展示
+[workflow-examp-video2.mp4](example/workflow-examp-video2.mp4)
+
 ## 项目结构
 
 ```text
