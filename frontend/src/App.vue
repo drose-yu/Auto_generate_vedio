@@ -997,7 +997,7 @@ function resolveMainTextPresetValue(currentValue: string): string {
     <section class="hero-panel">
       <div class="hero-copy">
         <p class="eyebrow">Python + Vue</p>
-        <h1>Coze 工作流复刻</h1>
+        <h1>视频生成工作流</h1>
         <p class="hero-text">
           配置文本模型、图片模型和语音参数后，一键生成剧情、角色、分镜、首帧、视频与旁白。建议先在后端配置好 API Key，再在此页按需调整参数。
         </p>
