@@ -1,5 +1,6 @@
 import base64
 import asyncio
+from collections.abc import Awaitable, Callable
 import json
 import math
 import uuid
@@ -13,6 +14,9 @@ from app.services.helpers import extract_json_payload
 
 class DoubaoClientError(RuntimeError):
     pass
+
+
+VideoPollProgressCallback = Callable[[str, int, str | None], Awaitable[None] | None]
 
 
 class DoubaoClient:
@@ -98,6 +102,8 @@ class DoubaoClient:
         image_url: str,
         audio_url: str | None = None,
         duration_seconds: int | None = None,
+        frame_count: int | None = None,
+        on_poll_progress: VideoPollProgressCallback | None = None,
     ) -> str:
         if not self.config.video_model:
             raise DoubaoClientError("Video model is not configured.")
@@ -110,6 +116,7 @@ class DoubaoClient:
                 image_url=image_url,
                 audio_url=audio_url,
                 duration_seconds=duration,
+                frame_count=frame_count,
             ),
         }
         try:
@@ -128,6 +135,7 @@ class DoubaoClient:
                         image_url=image_url,
                         audio_url=None,
                         duration_seconds=duration,
+                        frame_count=frame_count,
                     ),
                 }
                 response = await self._post_json_with_retry(
@@ -151,7 +159,7 @@ class DoubaoClient:
         if not task_id:
             raise DoubaoClientError("Video generation response did not contain url or task id.")
 
-        return await self._poll_video_task(task_id)
+        return await self._poll_video_task(task_id, on_poll_progress=on_poll_progress)
 
     async def synthesize_speech(self, *, text: str, tts_config: TtsConfig) -> str:
         if _is_tts_sse_endpoint(tts_config.endpoint):
@@ -387,11 +395,18 @@ class DoubaoClient:
             ) from last_request_error
         raise DoubaoClientError(f"Failed during {action}: request did not complete.")  # pragma: no cover
 
-    async def _poll_video_task(self, task_id: str) -> str:
+    async def _poll_video_task(
+        self,
+        task_id: str,
+        *,
+        on_poll_progress: VideoPollProgressCallback | None = None,
+    ) -> str:
         poll_interval = max(1, int(getattr(self.config, "video_poll_interval_seconds", 2) or 2))
         poll_timeout = max(0, int(getattr(self.config, "video_poll_timeout_seconds", 0) or 0))
         max_rounds = None if poll_timeout == 0 else max(1, math.ceil(poll_timeout / poll_interval))
+        heartbeat_round_interval = max(1, math.ceil(30 / poll_interval))
         last_status: str | None = None
+        last_reported_status: str | None = None
         round_index = 0
         while True:
             round_index += 1
@@ -405,13 +420,30 @@ class DoubaoClient:
             if isinstance(top_level_error, dict):
                 raise DoubaoClientError(_format_video_error(top_level_error))
 
+            status = _extract_video_status(payload)
+            if status:
+                last_status = status
+
             url = _extract_video_url(payload)
             if url:
                 return url
 
-            status = _extract_video_status(payload)
-            if status:
-                last_status = status
+            if on_poll_progress is not None:
+                status_for_log = status or last_status
+                should_report = (
+                    round_index == 1
+                    or status_for_log != last_reported_status
+                    or (round_index % heartbeat_round_interval == 0)
+                )
+                if should_report:
+                    try:
+                        maybe_awaitable = on_poll_progress(task_id, round_index, status_for_log)
+                        if maybe_awaitable is not None:
+                            await maybe_awaitable
+                    except Exception:
+                        pass
+                    last_reported_status = status_for_log
+
             if status in {"failed", "error", "cancelled", "canceled"}:
                 raise DoubaoClientError(
                     f"Video generation task failed (task_id={task_id}, status={status}): {payload}"
@@ -539,7 +571,7 @@ def _find_first_string_value(node: Any, keys: set[str]) -> str | None:
     return None
 
 
-def _compose_video_prompt(*, prompt: str, duration_seconds: int) -> str:
+def _compose_video_prompt(*, prompt: str, duration_seconds: int, frame_count: int | None = None) -> str:
     base = (prompt or "").strip()
     duration = int(duration_seconds)
     auto_duration = duration == -1
@@ -575,7 +607,10 @@ def _compose_video_prompt(*, prompt: str, duration_seconds: int) -> str:
             f"- {beat_1}s-{beat_2}s: peak body motion + strongest camera motion + secondary motion response.\n"
             f"- {beat_2}s-{duration}s: decisive settle + clear final pose + final emotion landing.\n"
         )
-    suffix = f"--resolution 1080p --duration {duration} --camerafixed false --watermark true"
+    if frame_count is not None:
+        suffix = f"--resolution 1080p --frames {int(frame_count)} --camerafixed false --watermark true"
+    else:
+        suffix = f"--resolution 1080p --duration {duration} --camerafixed false --watermark true"
     if base:
         return f"{base}\n\n{motion_directive}\n{suffix}"
     return f"{motion_directive}\n{suffix}"
@@ -587,11 +622,16 @@ def _build_video_content(
     image_url: str,
     audio_url: str | None,
     duration_seconds: int,
+    frame_count: int | None = None,
 ) -> list[dict[str, Any]]:
     content: list[dict[str, Any]] = [
         {
             "type": "text",
-            "text": _compose_video_prompt(prompt=prompt, duration_seconds=duration_seconds),
+            "text": _compose_video_prompt(
+                prompt=prompt,
+                duration_seconds=duration_seconds,
+                frame_count=frame_count,
+            ),
         },
         {
             "type": "image_url",

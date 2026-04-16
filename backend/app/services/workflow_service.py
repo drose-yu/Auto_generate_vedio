@@ -2,6 +2,7 @@ import asyncio
 import base64
 import binascii
 from collections.abc import Awaitable, Iterable
+import math
 import mimetypes
 from pathlib import Path
 import re
@@ -23,6 +24,7 @@ from app.models.schemas import (
     WorkflowRunRequest,
     WorkflowRunResponse,
     WorkflowTextModels,
+    resolve_video_duration_rule,
 )
 from app.services.doubao_client import DoubaoClient, DoubaoClientError
 from app.services.helpers import (
@@ -593,11 +595,44 @@ class WorkflowService:
             video_model = getattr(client.config, "video_model", None)
             if first_frame_url and video_model and index < effective_video_max_shots:
                 try:
+                    configured_video_duration = int(
+                        getattr(client.config, "video_duration_seconds", 5) or 5
+                    )
+                    (
+                        target_video_duration,
+                        target_video_frames,
+                        duration_adjust_log,
+                        duration_warning,
+                    ) = await _resolve_video_duration_from_narration(
+                            video_model=video_model,
+                            configured_duration_seconds=configured_video_duration,
+                            narration_audio_url=narration_audio_url,
+                    )
+                    if duration_adjust_log:
+                        await _log(reporter, "videos", f"Shot {index + 1} {duration_adjust_log}")
+                    if duration_warning:
+                        warning = f"Shot {index + 1} {duration_warning}"
+                        warnings.append(warning)
+                        await _log(reporter, "videos", warning, level="warning")
+
+                    async def _emit_video_poll_progress(task_id: str, round_index: int, status: str | None) -> None:
+                        status_text = status or "unknown"
+                        await _log(
+                            reporter,
+                            "videos",
+                            (
+                                f"Shot {index + 1} video task polling: "
+                                f"round {round_index}, status={status_text}, task_id={task_id}."
+                            ),
+                        )
+
                     shot_video_url = await client.generate_video_from_image(
                         prompt=shot_video_prompt,
                         image_url=first_frame_url,
                         audio_url=narration_audio_url,
-                        duration_seconds=getattr(client.config, "video_duration_seconds", 5),
+                        duration_seconds=target_video_duration,
+                        frame_count=target_video_frames,
+                        on_poll_progress=_emit_video_poll_progress,
                     )
                     if narration_audio_url:
                         muxed_video_url = await _mux_video_with_narration(
@@ -667,6 +702,69 @@ async def gather_limited(tasks: Iterable[Awaitable], limit: int) -> list:
             return await task
 
     return await asyncio.gather(*(runner(task) for task in tasks))
+
+
+async def _resolve_video_duration_from_narration(
+    *,
+    video_model: str | None,
+    configured_duration_seconds: int,
+    narration_audio_url: str | None,
+) -> tuple[int, int | None, str | None, str | None]:
+    if configured_duration_seconds == -1:
+        # Keep provider auto mode as-is.
+        return configured_duration_seconds, None, None, None
+    if configured_duration_seconds <= 0:
+        return configured_duration_seconds, None, None, None
+    if not narration_audio_url:
+        return configured_duration_seconds, None, None, None
+
+    audio_duration_seconds = await _estimate_audio_duration_seconds(narration_audio_url)
+    if audio_duration_seconds is None:
+        return configured_duration_seconds, None, None, None
+
+    min_seconds, max_seconds, _ = resolve_video_duration_rule(video_model)
+    required_seconds = max(min_seconds, int(math.ceil(audio_duration_seconds + 0.5)))
+    desired_seconds = max(configured_duration_seconds, required_seconds)
+    adjusted_seconds = min(max_seconds, desired_seconds)
+
+    log_parts: list[str] = []
+    if adjusted_seconds != configured_duration_seconds:
+        log_parts.append(
+            "video duration auto-adjusted "
+            f"{configured_duration_seconds}s -> {adjusted_seconds}s "
+            f"to fit narration ({audio_duration_seconds:.2f}s)"
+        )
+
+    frame_count: int | None = None
+    frame_seconds: float | None = None
+    frames_cap_seconds = 289 / 24
+    if adjusted_seconds <= frames_cap_seconds + 1e-6:
+        frame_target_seconds = max(float(adjusted_seconds), audio_duration_seconds + 0.2)
+        frame_count = _nearest_supported_frame_count_at_or_above(frame_target_seconds)
+        frame_seconds = frame_count / 24.0
+        log_parts.append(
+            f"using frames={frame_count} (~{frame_seconds:.3f}s) for finer timing."
+        )
+
+    adjust_log = " ".join(log_parts) if log_parts else None
+    warning: str | None = None
+    effective_video_seconds = frame_seconds if frame_seconds is not None else float(adjusted_seconds)
+    if effective_video_seconds + 0.05 < audio_duration_seconds:
+        model_name = video_model or "default-video-model"
+        warning = (
+            f"narration length is {audio_duration_seconds:.2f}s, but model '{model_name}' "
+            f"max duration is {max_seconds}s; final audio may still be longer than video "
+            f"(effective_video≈{effective_video_seconds:.3f}s)."
+        )
+
+    return adjusted_seconds, frame_count, adjust_log, warning
+
+
+def _nearest_supported_frame_count_at_or_above(target_seconds: float) -> int:
+    raw_frames = max(29, int(math.ceil(target_seconds * 24)))
+    n = max(1, int(math.ceil((raw_frames - 25) / 4)))
+    frames = 25 + (4 * n)
+    return min(289, max(29, frames))
 
 
 async def _stage(
@@ -1010,6 +1108,14 @@ def _find_ffmpeg_binary() -> str | None:
     return None
 
 
+def _find_ffprobe_binary() -> str | None:
+    for candidate in ("ffprobe", "ffprobe.exe"):
+        found = shutil.which(candidate)
+        if found:
+            return found
+    return None
+
+
 async def _run_subprocess(cmd: list[str]) -> tuple[int, str]:
     try:
         process = await asyncio.create_subprocess_exec(
@@ -1038,6 +1144,108 @@ async def _run_subprocess(cmd: list[str]) -> tuple[int, str]:
             return completed.returncode, stderr_text
 
         return await asyncio.to_thread(_run_sync)
+
+
+async def _run_subprocess_capture(cmd: list[str]) -> tuple[int, str, str]:
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        stdout_text = stdout.decode("utf-8", errors="replace") if stdout else ""
+        stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""
+        return process.returncode, stdout_text, stderr_text
+    except NotImplementedError:
+        def _run_sync() -> tuple[int, str, str]:
+            completed = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+            stdout_text = completed.stdout.decode("utf-8", errors="replace") if completed.stdout else ""
+            stderr_text = completed.stderr.decode("utf-8", errors="replace") if completed.stderr else ""
+            return completed.returncode, stdout_text, stderr_text
+
+        return await asyncio.to_thread(_run_sync)
+
+
+async def _estimate_audio_duration_seconds(audio_url: str) -> float | None:
+    try:
+        audio_bytes, audio_suffix = await _fetch_asset_bytes(audio_url, fallback_suffix=".mp3")
+    except RuntimeError:
+        return None
+
+    suffix = audio_suffix if audio_suffix.startswith(".") else ".mp3"
+    with tempfile.TemporaryDirectory(prefix="shot_audio_probe_") as tmp_dir_str:
+        tmp_dir = Path(tmp_dir_str)
+        audio_path = tmp_dir / f"audio_in{suffix}"
+        audio_path.write_bytes(audio_bytes)
+
+        ffprobe_bin = _find_ffprobe_binary()
+        if ffprobe_bin:
+            ffprobe_cmd = [
+                ffprobe_bin,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(audio_path),
+            ]
+            _, stdout_text, _ = await _run_subprocess_capture(ffprobe_cmd)
+            parsed = _parse_duration_seconds_text(stdout_text)
+            if parsed is not None:
+                return parsed
+
+        ffmpeg_bin = _find_ffmpeg_binary()
+        if ffmpeg_bin:
+            ffmpeg_cmd = [
+                ffmpeg_bin,
+                "-v",
+                "info",
+                "-i",
+                str(audio_path),
+                "-f",
+                "null",
+                "-",
+            ]
+            _, _, stderr_text = await _run_subprocess_capture(ffmpeg_cmd)
+            parsed = _parse_ffmpeg_duration(stderr_text)
+            if parsed is not None:
+                return parsed
+
+    return None
+
+
+def _parse_duration_seconds_text(text: str) -> float | None:
+    candidate = (text or "").strip().splitlines()
+    if not candidate:
+        return None
+    value = candidate[0].strip()
+    try:
+        duration = float(value)
+    except (TypeError, ValueError):
+        return None
+    if duration <= 0:
+        return None
+    return duration
+
+
+def _parse_ffmpeg_duration(stderr_text: str) -> float | None:
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", stderr_text or "")
+    if match is None:
+        return None
+    hours = int(match.group(1))
+    minutes = int(match.group(2))
+    seconds = float(match.group(3))
+    total_seconds = (hours * 3600) + (minutes * 60) + seconds
+    if total_seconds <= 0:
+        return None
+    return total_seconds
 
 
 async def _fetch_asset_bytes(asset_url: str, *, fallback_suffix: str) -> tuple[bytes, str]:
