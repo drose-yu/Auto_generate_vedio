@@ -30,6 +30,9 @@ async def build_assets_zip(result: WorkflowRunResponse) -> bytes:
             archive.writestr("result.json", result.model_dump_json(indent=2))
             for path, content in debug_files.items():
                 archive.writestr(path, content)
+            subtitle_files = _build_subtitle_artifacts(result)
+            for path, content in subtitle_files.items():
+                archive.writestr(path, content)
 
             for asset_url, target_prefix in _iter_asset_targets(result):
                 try:
@@ -62,6 +65,11 @@ async def persist_workflow_run(
         target_path = run_dir / Path(path)
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_text(content, encoding="utf-8")
+    subtitle_files = _build_subtitle_artifacts(result)
+    for path, content in subtitle_files.items():
+        target_path = run_dir / Path(path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(content, encoding="utf-8-sig")
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         for asset_url, target_prefix in _iter_asset_targets(result):
@@ -92,6 +100,7 @@ async def persist_workflow_run(
         role_image_count=sum(1 for item in result.role_images if item.image_url),
         shot_first_frame_count=sum(1 for item in result.shots if item.first_frame_url),
         shot_audio_count=sum(1 for item in result.shots if item.narration_audio_url),
+        shot_subtitle_count=sum(1 for item in result.shots if item.subtitle_srt),
     )
     manifest_path = run_dir / "manifest.json"
     manifest_path.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
@@ -172,6 +181,7 @@ def _build_fallback_summary_from_run_dir(run_dir: Path) -> WorkflowSavedRunSumma
         role_image_count=sum(1 for item in result.role_images if item.image_url),
         shot_first_frame_count=sum(1 for item in result.shots if item.first_frame_url),
         shot_audio_count=sum(1 for item in result.shots if item.narration_audio_url),
+        shot_subtitle_count=sum(1 for item in result.shots if item.subtitle_srt),
     )
 
 
@@ -195,6 +205,14 @@ def _iter_asset_targets(result: WorkflowRunResponse) -> list[tuple[str, str]]:
             targets.append((shot.narration_audio_url, f"shot_audio/shot_{shot.index:02d}"))
 
     return targets
+
+
+def _build_subtitle_artifacts(result: WorkflowRunResponse) -> dict[str, str]:
+    files: dict[str, str] = {}
+    for shot in sorted(result.shots, key=lambda s: s.index):
+        if shot.subtitle_srt:
+            files[f"subtitles/shot_{shot.index:02d}.srt"] = shot.subtitle_srt
+    return files
 
 
 def _build_debug_artifacts(result: WorkflowRunResponse) -> dict[str, str]:

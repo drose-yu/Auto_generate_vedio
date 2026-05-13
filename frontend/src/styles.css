@@ -670,3 +670,34 @@ textarea {
   }
 }
 
+.subtitle-details {
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+
+.subtitle-details summary {
+  cursor: pointer;
+  color: #287b6f;
+  font-weight: 500;
+  user-select: none;
+}
+
+.subtitle-details summary:hover {
+  opacity: 0.8;
+}
+
+.subtitle-preview {
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(17, 35, 34, 0.1);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 6px 0 0;
+  font-family: "Cascadia Code", "SF Mono", Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  max-height: 200px;
+  overflow-y: auto;
+}
+

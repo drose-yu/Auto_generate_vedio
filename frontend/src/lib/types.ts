@@ -87,6 +87,7 @@ export interface ShotResult {
   first_frame_prompt?: string | null;
   first_frame_url?: string | null;
   shot_video_url?: string | null;
+  subtitle_srt?: string | null;
 }
 
 export interface WorkflowRunResponse {

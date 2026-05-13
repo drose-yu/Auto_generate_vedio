@@ -172,6 +172,7 @@ class WorkflowRunRequest(BaseModel):
     connection: DoubaoConnectionConfig
     text_models: WorkflowTextModels = Field(default_factory=WorkflowTextModels)
     tts: TtsConfig = Field(default_factory=TtsConfig)
+    subtitle_enabled: bool = False
     max_images: int = Field(default=3, ge=1, le=6)
 
     @field_validator("story_text")
@@ -236,6 +237,7 @@ class ShotResult(BaseModel):
     first_frame_prompt: str | None = None
     first_frame_url: str | None = None
     shot_video_url: str | None = None
+    subtitle_srt: str | None = None
 
 
 class WorkflowRunResponse(BaseModel):
@@ -283,4 +285,5 @@ class WorkflowSavedRunSummary(BaseModel):
     role_image_count: int = 0
     shot_first_frame_count: int = 0
     shot_audio_count: int = 0
+    shot_subtitle_count: int = 0
 

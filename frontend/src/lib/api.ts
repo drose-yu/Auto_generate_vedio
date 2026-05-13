@@ -114,8 +114,8 @@ export async function downloadSavedWorkflowAssets(jobId: string): Promise<Blob> 
   return await response.blob();
 }
 
-export async function composeSavedWorkflowVideo(jobId: string, withAudio = false): Promise<Blob> {
-  const query = new URLSearchParams({ with_audio: String(withAudio) });
+export async function composeSavedWorkflowVideo(jobId: string, withAudio = false, withSubtitles = false): Promise<Blob> {
+  const query = new URLSearchParams({ with_audio: String(withAudio), with_subtitles: String(withSubtitles) });
   const response = await fetch(`/api/workflow/history/${jobId}/compose?${query.toString()}`, {
     method: "POST",
   });

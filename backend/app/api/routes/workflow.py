@@ -159,12 +159,14 @@ async def download_saved_workflow_assets(job_id: str) -> FileResponse:
 async def compose_saved_workflow_video(
     job_id: str,
     with_audio: bool = Query(default=False),
+    with_subtitles: bool = Query(default=False),
 ) -> FileResponse:
     try:
         output_path = await asyncio.to_thread(
             compose_saved_run_video,
             job_id,
             with_audio=with_audio,
+            with_subtitles=with_subtitles,
         )
     except WorkflowComposeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

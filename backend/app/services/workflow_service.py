@@ -209,6 +209,7 @@ class WorkflowService:
                 role_images=role_images,
                 tts_enabled=resolved_request.tts.ready,
                 tts_config=resolved_request.tts,
+                subtitle_enabled=resolved_request.subtitle_enabled,
                 video_max_shots=resolved_request.connection.video_max_shots,
                 warnings=warnings,
                 reporter=reporter,
@@ -388,6 +389,7 @@ class WorkflowService:
         role_images: list[RoleImageResult],
         tts_enabled: bool,
         tts_config: TtsConfig,
+        subtitle_enabled: bool = False,
         video_max_shots: int = 8,
         warnings: list[str],
         reporter: WorkflowReporter | None,
@@ -580,6 +582,16 @@ class WorkflowService:
                     progress_percent=86,
                 )
 
+            subtitle_srt: str | None = None
+            if subtitle_enabled and narration_audio_url and narration_text:
+                try:
+                    audio_dur = await _estimate_audio_duration_seconds(narration_audio_url)
+                    if audio_dur and audio_dur > 0:
+                        subtitle_srt = _generate_subtitle_srt(narration_text, audio_dur)
+                        await _log(reporter, "audio", f"Shot {index + 1} subtitles generated.")
+                except Exception:
+                    subtitle_srt = None
+
             shot_video_prompt = _compose_shot_video_prompt(
                 highlight=highlight,
                 scene_note=mapping.scene_note,
@@ -685,6 +697,7 @@ class WorkflowService:
                     first_frame_prompt=first_frame_prompt,
                     first_frame_url=first_frame_url,
                     shot_video_url=shot_video_url,
+                    subtitle_srt=subtitle_srt,
                 )
             )
             if continuity_end_state:
@@ -1289,6 +1302,57 @@ def _guess_extension(*, asset_url: str, media_type: str, fallback: str) -> str:
     if suffix:
         return suffix
     return fallback
+
+
+def _seconds_to_srt_time(total_seconds: float) -> str:
+    total_seconds = max(0.0, total_seconds)
+    hours = int(total_seconds // 3600)
+    minutes = int((total_seconds % 3600) // 60)
+    seconds = int(total_seconds % 60)
+    milliseconds = int(round((total_seconds - int(total_seconds)) * 1000))
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
+
+
+def _split_into_subtitle_segments(text: str) -> list[str]:
+    if not text or not text.strip():
+        return []
+    segments = re.split(r"(?<=[。！？\.\!\?])", text.strip())
+    segments = [s.strip() for s in segments if s.strip()]
+    if not segments:
+        return [text.strip()]
+    merged: list[str] = []
+    for seg in segments:
+        if merged and len(seg) < 5:
+            merged[-1] += seg
+        else:
+            merged.append(seg)
+    return merged
+
+
+def _generate_subtitle_srt(narration_text: str, audio_duration_seconds: float) -> str:
+    if not narration_text or audio_duration_seconds <= 0:
+        return ""
+    segments = _split_into_subtitle_segments(narration_text)
+    if not segments:
+        return ""
+    total_chars = sum(len(seg) for seg in segments)
+    if total_chars <= 0:
+        return ""
+    lines: list[str] = []
+    current_time = 0.0
+    min_duration = 0.8
+    for i, segment in enumerate(segments):
+        proportion = len(segment) / total_chars
+        duration = max(proportion * audio_duration_seconds, min_duration)
+        if i == len(segments) - 1:
+            duration = audio_duration_seconds - current_time
+        start_time = current_time
+        end_time = min(current_time + duration, audio_duration_seconds)
+        start_srt = _seconds_to_srt_time(start_time)
+        end_srt = _seconds_to_srt_time(end_time)
+        lines.append(f"{i + 1}\n{start_srt} --> {end_srt}\n{segment}")
+        current_time = end_time
+    return "\n\n".join(lines)
 
 
 def _tail_error_text(text: str, *, max_len: int = 1200) -> str:

@@ -744,7 +744,7 @@ async function composeHistoryVideo(jobId: string) {
   isComposingHistoryVideo.value = true;
   errorMessage.value = "";
   try {
-    const blob = await composeSavedWorkflowVideo(jobId, true);
+    const blob = await composeSavedWorkflowVideo(jobId, true, true);
     saveBlob(blob, `workflow-composed-with-audio-${jobId}.mp4`);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "合成历史视频失败，请重试。";
@@ -818,6 +818,7 @@ function createDefaultState(defaultStoryShotCount: number): WorkflowRunRequest {
       uid: "doubao-workflow-web",
     },
     max_images: 3,
+    subtitle_enabled: false,
   };
 }
 
@@ -1046,7 +1047,7 @@ function resolveMainTextPresetValue(currentValue: string): string {
               </div>
               <div class="history-buttons">
                 <button class="secondary-button" type="button" :disabled="isComposingHistoryVideo" @click.stop="composeHistoryVideo(item.job_id)">
-                  {{ isComposingHistoryVideo ? "合成中..." : "合成视频" }}
+                  {{ isComposingHistoryVideo ? "合成中..." : "合成视频(含字幕)" }}
                 </button>
                 <button class="secondary-button" type="button" :disabled="isDownloadingHistoryAssets" @click.stop="downloadHistoryAssets(item.job_id)">
                   {{ isDownloadingHistoryAssets ? "下载中..." : "下载 ZIP" }}
@@ -1289,6 +1290,17 @@ function resolveMainTextPresetValue(currentValue: string): string {
         <p v-if="voiceTestMessage" class="field-hint">{{ voiceTestMessage }}</p>
         <audio v-if="voiceTestAudioUrl" :src="voiceTestAudioUrl" controls preload="none" />
 
+        <div class="section-title tts-head" style="margin-top: 8px">
+          <span>字幕</span>
+          <label class="toggle">
+            <input v-model="form.subtitle_enabled" type="checkbox" />
+            <span>启用字幕</span>
+          </label>
+        </div>
+        <p class="field-hint">
+          启用后将为每个镜头生成 SRT 字幕（依赖 TTS 旁白音频），字幕会烧录到合成视频中。
+        </p>
+
         <div class="action-stack">
           <button class="run-button" type="submit" :disabled="isRunning || isCancelling">
             {{ isCancelling ? "取消中..." : isRunning ? "运行中..." : "开始运行" }}
@@ -1414,6 +1426,10 @@ function resolveMainTextPresetValue(currentValue: string): string {
                   <span>旁白文案：{{ shot.narration_text }}</span>
                   <audio v-if="shot.narration_audio_url" :src="shot.narration_audio_url" controls preload="none" />
                 </div>
+                <details v-if="shot.subtitle_srt" class="subtitle-details">
+                  <summary>字幕 (SRT)</summary>
+                  <pre class="subtitle-preview">{{ shot.subtitle_srt }}</pre>
+                </details>
                 <div v-if="shot.first_frame_url" class="video-block">
                   <span>首帧图片</span>
                   <img :src="shot.first_frame_url" :alt="`Shot ${shot.index} first frame`" class="shot-video" />
